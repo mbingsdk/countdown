@@ -62,7 +62,7 @@ Nama Worker mengikuti konfigurasi di `wrangler.jsonc`, yaitu `loop-countdown`.
 
 - Buka URL Worker.
 - Endpoint baca timer langsung tersedia tanpa login.
-- Masukkan password kontrol untuk membuka tombol `Start`, `Stop`, `Reset`, dan pengaturan durasi.
+- Masukkan password kontrol untuk membuka tombol `Start`, `Stop`, `Reset`, koreksi waktu live, dan pengaturan durasi.
 - Durasi diatur dalam jam, menit, dan detik.
 - Klik `Kunci kontrol` untuk menghapus password dari browser.
 
@@ -121,6 +121,23 @@ curl -X POST http://localhost:8787/api/stop \
 curl -X POST http://localhost:8787/api/reset \
   -H "Authorization: Bearer PASSWORD_ANDA"
 ```
+
+### Koreksi waktu tanpa menghentikan timer
+
+Endpoint `/api/adjust` menggeser posisi countdown saat timer tetap berjalan.
+
+- Nilai positif memajukan countdown sehingga sisa waktu berkurang.
+- Nilai negatif memundurkan countdown sehingga sisa waktu bertambah.
+- Nilai yang diterima adalah `-3600` sampai `3600`, kecuali `0`.
+
+```bash
+curl -X POST http://localhost:8787/api/adjust \
+  -H "Authorization: Bearer PASSWORD_ANDA" \
+  -H "Content-Type: application/json" \
+  -d '{"seconds":1}'
+```
+
+Contoh `{"seconds":1}` memajukan countdown 1 detik, sedangkan `{"seconds":-1}` memundurkannya 1 detik.
 
 ### Mengatur durasi
 
