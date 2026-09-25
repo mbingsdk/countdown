@@ -630,7 +630,13 @@ $("login").onsubmit = async (e) => {
 };
 $("lock").onclick = () => { setPw(""); $("msg").textContent = ""; };
 call("/api/time");
-setInterval(() => call("/api/time"), 5000);
+setInterval(() => {
+  if (!document.hidden) call("/api/time");
+}, 60000);
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) call("/api/time");
+});
 tick();
 </script>
 </body>
