@@ -46,6 +46,18 @@ export class Timer extends DurableObject {
       if (s.running) { s.base += now - s.startedAt; s.running = false; }
     } else if (p === "/api/reset") {
       s.base = 0; s.startedAt = now;
+    } else if (p === "/api/adjust") {
+      let sec = url.searchParams.get("seconds");
+      if (req.method === "POST") { try { sec = (await req.json()).seconds; } catch {} }
+      sec = Number(sec);
+      if (!Number.isFinite(sec) || sec === 0 || Math.abs(sec) > 3600)
+        return json({ error: "seconds harus antara -3600 dan 3600, selain 0" }, 400);
+
+      // Positif = majukan posisi countdown (sisa waktu berkurang).
+      // Negatif = mundurkan posisi countdown (sisa waktu bertambah).
+      const elapsed = s.base + (s.running ? now - s.startedAt : 0);
+      s.base = Math.max(0, elapsed + Math.round(sec * 1000));
+      if (s.running) s.startedAt = now;
     } else if (p === "/api/duration") {
       let sec = url.searchParams.get("seconds");
       if (req.method === "POST") { try { sec = (await req.json()).seconds; } catch {} }
@@ -133,6 +145,7 @@ main:before{content:'LOOP // COUNTDOWN';position:absolute;top:8px;left:26px;colo
 .running .dot{background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pulse 1.2s ease-in-out infinite}
 @keyframes pulse{50%{opacity:.25}}
 .row{grid-column:2;display:flex;gap:8px}
+.adjust button{font-size:13px;padding:9px 10px}
 button{font:600 16px 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--line);border-radius:2px;padding:12px 16px;cursor:pointer;background:var(--panel);color:var(--ink);flex:1;transition:background .15s,border-color .15s,transform .15s}
 button:hover{border-color:var(--cyan);background:#17241d}
 button.main{background:var(--accent);border-color:var(--accent);color:var(--on);box-shadow:0 0 14px rgba(185,255,56,.18)}
@@ -174,6 +187,12 @@ code::-webkit-scrollbar-thumb{background:var(--cyan);border-radius:0}
     <button id="stop">Stop</button>
     <button id="reset">Reset</button>
   </div>
+  <div class="row ctl adjust">
+    <button id="back10">Mundur 10s</button>
+    <button id="back1">Mundur 1s</button>
+    <button id="forward1">Maju 1s</button>
+    <button id="forward10">Maju 10s</button>
+  </div>
   <div class="set ctl">
     <label>Jam<input id="h" type="number" min="0" value="0"></label>
     <label>Menit<input id="m" type="number" min="0" value="1"></label>
@@ -212,6 +231,8 @@ $("api").textContent = [
   "CONTROL WRITE", "> POST " + location.origin + "/api/start",
   "> POST " + location.origin + "/api/stop",
   "> POST " + location.origin + "/api/reset",
+  "> POST " + location.origin + "/api/adjust",
+  "  Body: { 'seconds': 1 } // maju, -1 // mundur",
   "> POST " + location.origin + "/api/duration",
   "  Body: { 'seconds': 60 }",
   "  AUTH // Bearer PASSWORD"
@@ -271,6 +292,17 @@ function tick() {
 $("start").onclick = () => call("/api/start", { method: "POST" });
 $("stop").onclick = () => call("/api/stop", { method: "POST" });
 $("reset").onclick = () => call("/api/reset", { method: "POST" });
+function adjust(seconds) {
+  call("/api/adjust", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ seconds }),
+  });
+}
+$("back10").onclick = () => adjust(-10);
+$("back1").onclick = () => adjust(-1);
+$("forward1").onclick = () => adjust(1);
+$("forward10").onclick = () => adjust(10);
 $("save").onclick = () => {
   const sec = (+$("h").value || 0) * 3600 + (+$("m").value || 0) * 60 + (+$("s").value || 0);
   call("/api/duration", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ seconds: sec }) });
