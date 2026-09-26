@@ -14,6 +14,55 @@ const json = (d, status = 200) =>
 const pad = (n) => String(n).padStart(2, "0");
 const hms = (s) => `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 
+const GAME_STAGES = [
+  { duration: 300000, time: "05:59" },
+  { duration: 300000, time: "06:59" },
+  { duration: 300000, time: "08:59" },
+  { duration: 300000, time: "10:29" },
+  { duration: 300000, time: "11:59" },
+  { duration: 300000, time: "13:29" },
+  { duration: 300000, time: "14:59" },
+  { duration: 300000, time: "16:29" },
+  { duration: 300000, time: "17:29" },
+  { duration: 240000, time: "19:29" },
+  { duration: 120000, time: "20:59" },
+  { duration: 360000, time: "00:00" },
+  { duration: 120000, time: "01:59" },
+  { duration: 120000, time: "03:59" },
+];
+const GAME_CYCLE_MS = GAME_STAGES.reduce((sum, stage) => sum + stage.duration, 0);
+const mod = (n, m) => ((n % m) + m) % m;
+
+function gameView(g, now) {
+  const elapsed = g.base + (g.running ? now - g.startedAt : 0);
+  const position = mod(elapsed, GAME_CYCLE_MS);
+  let cursor = 0;
+  let index = GAME_STAGES.length - 1;
+
+  for (let i = 0; i < GAME_STAGES.length; i++) {
+    const end = cursor + GAME_STAGES[i].duration;
+    if (position < end) { index = i; break; }
+    cursor = end;
+  }
+
+  const stage = GAME_STAGES[index];
+  const stageElapsed = position - cursor;
+  const remaining = stage.duration - stageElapsed;
+
+  return {
+    running: g.running,
+    stage: index + 1,
+    game_time: stage.time,
+    next_game_time: GAME_STAGES[(index + 1) % GAME_STAGES.length].time,
+    stage_duration_ms: stage.duration,
+    stage_elapsed_ms: stageElapsed,
+    remaining_ms: remaining,
+    remaining_seconds: Math.ceil(remaining / 1000),
+    position_ms: position,
+    cycle_duration_ms: GAME_CYCLE_MS,
+  };
+}
+
 // Waktu dihitung dari timestamp, jadi timer tetap "jalan" walau tidak ada page yang terbuka.
 function view(s, now) {
   const elapsed = s.base + (s.running ? now - s.startedAt : 0);
@@ -38,14 +87,21 @@ export class Timer extends DurableObject {
     const url = new URL(req.url);
     const p = url.pathname;
     const now = Date.now();
-    let s = (await this.ctx.storage.get("s")) ?? { duration: 60000, running: false, base: 0, startedAt: 0 };
+    const [storedTimer, storedGame] = await Promise.all([
+      this.ctx.storage.get("s"),
+      this.ctx.storage.get("game"),
+    ]);
+    let s = storedTimer ?? { duration: 60000, running: false, base: 0, startedAt: 0 };
+    let g = storedGame ?? { running: false, base: 0, startedAt: 0 };
+    let saveTimer = false;
+    let saveGame = false;
 
     if (p === "/api/start") {
-      if (!s.running) { s.running = true; s.startedAt = now; }
+      if (!s.running) { s.running = true; s.startedAt = now; saveTimer = true; }
     } else if (p === "/api/stop") {
-      if (s.running) { s.base += now - s.startedAt; s.running = false; }
+      if (s.running) { s.base += now - s.startedAt; s.running = false; saveTimer = true; }
     } else if (p === "/api/reset") {
-      s.base = 0; s.startedAt = now;
+      s.base = 0; s.startedAt = now; saveTimer = true;
     } else if (p === "/api/adjust") {
       let sec = url.searchParams.get("seconds");
       if (req.method === "POST") { try { sec = (await req.json()).seconds; } catch {} }
@@ -58,18 +114,46 @@ export class Timer extends DurableObject {
       const elapsed = s.base + (s.running ? now - s.startedAt : 0);
       s.base = Math.max(0, elapsed + Math.round(sec * 1000));
       if (s.running) s.startedAt = now;
+      saveTimer = true;
     } else if (p === "/api/duration") {
       let sec = url.searchParams.get("seconds");
       if (req.method === "POST") { try { sec = (await req.json()).seconds; } catch {} }
       sec = Number(sec);
       if (!(sec >= 1 && sec <= 8640000)) return json({ error: "seconds harus antara 1 dan 8640000" }, 400);
-      s.duration = Math.round(sec * 1000); s.base = 0; s.startedAt = now;
+      s.duration = Math.round(sec * 1000); s.base = 0; s.startedAt = now; saveTimer = true;
+    } else if (p === "/api/game/start") {
+      if (!g.running) { g.running = true; g.startedAt = now; saveGame = true; }
+    } else if (p === "/api/game/stop") {
+      if (g.running) {
+        g.base = mod(g.base + now - g.startedAt, GAME_CYCLE_MS);
+        g.running = false;
+        saveGame = true;
+      }
+    } else if (p === "/api/game/reset") {
+      g.base = 0;
+      g.startedAt = now;
+      saveGame = true;
+    } else if (p === "/api/game/adjust") {
+      let sec = url.searchParams.get("seconds");
+      if (req.method === "POST") { try { sec = (await req.json()).seconds; } catch {} }
+      sec = Number(sec);
+      if (!Number.isFinite(sec) || sec === 0 || Math.abs(sec) > 3600)
+        return json({ error: "seconds harus antara -3600 dan 3600, selain 0" }, 400);
+
+      const gameElapsed = g.base + (g.running ? now - g.startedAt : 0);
+      g.base = mod(gameElapsed + Math.round(sec * 1000), GAME_CYCLE_MS);
+      if (g.running) g.startedAt = now;
+      saveGame = true;
     } else if (p !== "/api/time") {
       return json({ error: "not found" }, 404);
     }
 
-    if (p !== "/api/time") await this.ctx.storage.put("s", s);
-    const v = view(s, now);
+    const writes = [];
+    if (saveTimer) writes.push(this.ctx.storage.put("s", s));
+    if (saveGame) writes.push(this.ctx.storage.put("game", g));
+    if (writes.length) await Promise.all(writes);
+
+    const v = { ...view(s, now), game_time: gameView(g, now) };
     if (url.searchParams.get("format") === "text")
       return new Response(v.formatted, { headers: { "Content-Type": "text/plain", "Cache-Control": "no-store", ...CORS } });
     return json(v);
@@ -270,6 +354,65 @@ button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid
   border:1px solid var(--line);
   background:var(--surface);
 }
+.game-card{padding:17px}
+.game-readout{
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:14px;
+  align-items:end;
+  margin-bottom:12px;
+}
+.game-clock{
+  font:500 clamp(34px,4vw,48px) var(--mono);
+  letter-spacing:-.05em;
+  line-height:1;
+}
+.game-stage{
+  margin-top:6px;
+  color:var(--muted-2);
+  font:500 10px var(--mono);
+  text-transform:uppercase;
+  letter-spacing:.08em;
+}
+.game-next{text-align:right}
+.game-next span{
+  display:block;
+  margin-bottom:5px;
+  color:var(--muted-2);
+  font:600 9px var(--mono);
+  text-transform:uppercase;
+  letter-spacing:.1em;
+}
+.game-next strong{
+  color:var(--accent);
+  font:500 20px var(--mono);
+}
+.game-progress{
+  height:3px;
+  overflow:hidden;
+  background:var(--track);
+  margin:0 0 13px;
+}
+.game-progress i{
+  display:block;
+  width:0;
+  height:100%;
+  background:var(--accent);
+  transition:width .18s linear;
+}
+.game-info{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:12px;
+  color:var(--muted-2);
+  font:400 10px var(--mono);
+}
+.game-action-row{margin-bottom:8px}
+.game-sync-grid{margin-top:8px}
+.game-running{
+  color:var(--accent);
+}
 .row{display:flex;gap:8px}
 .action-row button{min-height:48px}
 button{
@@ -454,6 +597,39 @@ code{
     </section>
 
     <aside class="controls">
+      <section class="control-card game-card">
+        <div class="section-heading">
+          <span class="eyebrow">Game Time</span>
+          <span class="hint" id="gameStatus">Berhenti</span>
+        </div>
+        <div class="game-readout">
+          <div>
+            <div class="game-clock" id="gameTime">05:59</div>
+            <div class="game-stage" id="gameStage">Stage #1</div>
+          </div>
+          <div class="game-next">
+            <span>Berubah dalam</span>
+            <strong id="gameRemaining">05:00</strong>
+          </div>
+        </div>
+        <div class="game-progress"><i id="gameProgress"></i></div>
+        <div class="game-info">
+          <span id="gameDuration">Durasi 05:00</span>
+          <span id="gameNext">Next 06:59</span>
+        </div>
+        <div class="row action-row game-action-row ctl">
+          <button class="main" id="gameStart">Start</button>
+          <button id="gameStop">Stop</button>
+          <button id="gameReset">Reset</button>
+        </div>
+        <div class="sync-grid game-sync-grid ctl">
+          <button id="gameBack10">−10s</button>
+          <button id="gameBack1">−1s</button>
+          <button id="gameForward1">+1s</button>
+          <button id="gameForward10">+10s</button>
+        </div>
+      </section>
+
       <section class="control-card ctl">
         <div class="section-heading">
           <span class="eyebrow">Timer control</span>
@@ -519,6 +695,38 @@ code{
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
+const GAME_STAGES = [
+  { seconds: 300, time: "05:59" },
+  { seconds: 300, time: "06:59" },
+  { seconds: 300, time: "08:59" },
+  { seconds: 300, time: "10:29" },
+  { seconds: 300, time: "11:59" },
+  { seconds: 300, time: "13:29" },
+  { seconds: 300, time: "14:59" },
+  { seconds: 300, time: "16:29" },
+  { seconds: 300, time: "17:29" },
+  { seconds: 240, time: "19:29" },
+  { seconds: 120, time: "20:59" },
+  { seconds: 360, time: "00:00" },
+  { seconds: 120, time: "01:59" },
+  { seconds: 120, time: "03:59" },
+].map((stage) => ({ ...stage, duration: stage.seconds * 1000 }));
+const GAME_CYCLE_MS = GAME_STAGES.reduce((sum, stage) => sum + stage.duration, 0);
+const mod = (n, m) => ((n % m) + m) % m;
+
+function gameStageAt(positionMs) {
+  const position = mod(positionMs, GAME_CYCLE_MS);
+  let cursor = 0;
+  for (let i = 0; i < GAME_STAGES.length; i++) {
+    const stage = GAME_STAGES[i];
+    if (position < cursor + stage.duration) {
+      return { index: i, stage, offset: position - cursor };
+    }
+    cursor += stage.duration;
+  }
+  return { index: 0, stage: GAME_STAGES[0], offset: 0 };
+}
+
 const rings = [
   { element: $("ring-seconds"), circumference: 2 * Math.PI * 118 },
   { element: $("ring-minutes"), circumference: 2 * Math.PI * 94 },
@@ -544,7 +752,12 @@ $("api").textContent = [
   "> POST " + location.origin + "/api/adjust",
   "  Body: { 'seconds': 1 } // maju, -1 // mundur",
   "> POST " + location.origin + "/api/duration",
-  "  Body: { 'seconds': 60 }",
+  "  Body: { 'seconds': 60 }", "",
+  "GAME TIME", "> POST " + location.origin + "/api/game/start",
+  "> POST " + location.origin + "/api/game/stop",
+  "> POST " + location.origin + "/api/game/reset",
+  "> POST " + location.origin + "/api/game/adjust",
+  "  Body: { 'seconds': 1 } // maju, -1 // mundur",
   "  AUTH // Bearer PASSWORD"
 ].join("\\n");
 
@@ -567,6 +780,12 @@ async function call(path, opt) {
     $("app").classList.toggle("running", d.running);
     $("state").textContent = d.running ? "Berjalan" : "Berhenti";
     $("start").disabled = d.running; $("stop").disabled = !d.running;
+    if (d.game_time) {
+      $("gameStart").disabled = d.game_time.running;
+      $("gameStop").disabled = !d.game_time.running;
+      $("gameStatus").textContent = d.game_time.running ? "Berjalan" : "Berhenti";
+      $("gameStatus").classList.toggle("game-running", d.game_time.running);
+    }
   } catch (e) { $("state").textContent = "Koneksi terputus"; }
 }
 const pad = (n) => String(n).padStart(2, "0");
@@ -598,6 +817,28 @@ function tick() {
     const cycle = Math.floor(e / S.duration_ms) + 1;
     $("state").textContent = S.running ? "Berjalan" : "Berhenti";
     $("meta").textContent = "PUTARAN " + cycle + " · " + (S.running ? "LIVE" : "PAUSED");
+
+    if (S.game_time) {
+      const gamePosition = S.game_time.position_ms + (S.game_time.running ? performance.now() - at : 0);
+      const current = gameStageAt(gamePosition);
+      const remainingMs = current.stage.duration - current.offset;
+      const remainingSeconds = Math.ceil(remainingMs / 1000);
+      const remainingMinutes = Math.floor(remainingSeconds / 60);
+      const remainingSecs = remainingSeconds % 60;
+      const stageMinutes = Math.floor(current.stage.seconds / 60);
+      const stageSecs = current.stage.seconds % 60;
+      const next = GAME_STAGES[(current.index + 1) % GAME_STAGES.length];
+      const progress = Math.min(Math.max(current.offset / current.stage.duration, 0), 1);
+
+      $("gameTime").textContent = current.stage.time;
+      $("gameStage").textContent = "STAGE #" + (current.index + 1);
+      $("gameRemaining").textContent = pad(remainingMinutes) + ":" + pad(remainingSecs);
+      $("gameDuration").textContent = "Durasi " + pad(stageMinutes) + ":" + pad(stageSecs);
+      $("gameNext").textContent = "Next " + next.time;
+      $("gameProgress").style.width = (progress * 100) + "%";
+      $("gameStatus").textContent = S.game_time.running ? "Berjalan" : "Berhenti";
+      $("gameStatus").classList.toggle("game-running", S.game_time.running);
+    }
   }
   requestAnimationFrame(tick);
 }
@@ -615,6 +856,22 @@ $("back10").onclick = () => adjust(-10);
 $("back1").onclick = () => adjust(-1);
 $("forward1").onclick = () => adjust(1);
 $("forward10").onclick = () => adjust(10);
+
+$("gameStart").onclick = () => call("/api/game/start", { method: "POST" });
+$("gameStop").onclick = () => call("/api/game/stop", { method: "POST" });
+$("gameReset").onclick = () => call("/api/game/reset", { method: "POST" });
+function adjustGame(seconds) {
+  call("/api/game/adjust", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ seconds }),
+  });
+}
+$("gameBack10").onclick = () => adjustGame(-10);
+$("gameBack1").onclick = () => adjustGame(-1);
+$("gameForward1").onclick = () => adjustGame(1);
+$("gameForward10").onclick = () => adjustGame(10);
+
 $("save").onclick = () => {
   const sec = (+$("h").value || 0) * 3600 + (+$("m").value || 0) * 60 + (+$("s").value || 0);
   call("/api/duration", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ seconds: sec }) });
