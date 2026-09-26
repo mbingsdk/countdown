@@ -781,7 +781,7 @@ const rings = [
   { element: $("ring-hours"), circumference: 2 * Math.PI * 70 },
 ];
 rings.forEach(({ element, circumference }) => { element.style.strokeDasharray = circumference; });
-let S = null, at = 0, filled = false, pw = "";
+let S = null, at = 0, filled = false, pw = "", gameStageDirty = false;
 try { pw = localStorage.getItem("pw") || ""; } catch (e) {}
 function setPw(v) {
   pw = v;
@@ -835,8 +835,12 @@ async function call(path, opt) {
       $("gameStop").disabled = !d.game_time.running;
       $("gameStatus").textContent = d.game_time.running ? "Berjalan" : "Berhenti";
       $("gameStatus").classList.toggle("game-running", d.game_time.running);
-      if (document.activeElement !== $("gameStageSelect")) {
+      if (!gameStageDirty || path === "/api/game/stage") {
         $("gameStageSelect").value = String(d.game_time.stage);
+      }
+      if (path === "/api/game/stage") {
+        gameStageDirty = false;
+        $("msg").textContent = "Game Time dipindah ke Stage #" + d.game_time.stage + " · " + d.game_time.game_time;
       }
     }
   } catch (e) { $("state").textContent = "Koneksi terputus"; }
@@ -889,9 +893,6 @@ function tick() {
       $("gameDuration").textContent = "Durasi " + pad(stageMinutes) + ":" + pad(stageSecs);
       $("gameNext").textContent = "Next " + next.time;
       $("gameProgress").style.width = (progress * 100) + "%";
-      if (document.activeElement !== $("gameStageSelect")) {
-        $("gameStageSelect").value = String(current.index + 1);
-      }
       $("gameStatus").textContent = S.game_time.running ? "Berjalan" : "Berhenti";
       $("gameStatus").classList.toggle("game-running", S.game_time.running);
     }
@@ -916,8 +917,12 @@ $("forward10").onclick = () => adjust(10);
 $("gameStart").onclick = () => call("/api/game/start", { method: "POST" });
 $("gameStop").onclick = () => call("/api/game/stop", { method: "POST" });
 $("gameReset").onclick = () => call("/api/game/reset", { method: "POST" });
+$("gameStageSelect").addEventListener("change", () => {
+  gameStageDirty = true;
+});
 $("gameSetStage").onclick = () => {
-  const stage = Number($("gameStageSelect").value);
+  const selected = $("gameStageSelect").value;
+  const stage = Number(selected);
   call("/api/game/stage", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
