@@ -24,7 +24,8 @@ const GAME_STAGES = [
   { duration: 300000, time: "14:59" },
   { duration: 300000, time: "16:29" },
   { duration: 300000, time: "17:29" },
-  { duration: 240000, time: "19:29" },
+  { duration: 120000, time: "18:29" },
+  { duration: 120000, time: "19:29" },
   { duration: 120000, time: "20:59" },
   { duration: 360000, time: "00:00" },
   { duration: 120000, time: "01:59" },
@@ -657,11 +658,12 @@ code{
             <option value="7">#7 · 14:59 · 05:00</option>
             <option value="8">#8 · 16:29 · 05:00</option>
             <option value="9">#9 · 17:29 · 05:00</option>
-            <option value="10">#10 · 19:29 · 04:00</option>
-            <option value="11">#11 · 20:59 · 02:00</option>
-            <option value="12">#12 · 00:00 · 06:00</option>
-            <option value="13">#13 · 01:59 · 02:00</option>
-            <option value="14">#14 · 03:59 · 02:00</option>
+            <option value="10">#10 · 18:29 · 02:00</option>
+            <option value="11">#11 · 19:29 · 02:00</option>
+            <option value="12">#12 · 20:59 · 02:00</option>
+            <option value="13">#13 · 00:00 · 06:00</option>
+            <option value="14">#14 · 01:59 · 02:00</option>
+            <option value="15">#15 · 03:59 · 02:00</option>
           </select>
           <button id="gameSetStage">Set</button>
         </div>
@@ -753,7 +755,8 @@ const GAME_STAGES = [
   { seconds: 300, time: "14:59" },
   { seconds: 300, time: "16:29" },
   { seconds: 300, time: "17:29" },
-  { seconds: 240, time: "19:29" },
+  { seconds: 120, time: "18:29" },
+  { seconds: 120, time: "19:29" },
   { seconds: 120, time: "20:59" },
   { seconds: 360, time: "00:00" },
   { seconds: 120, time: "01:59" },
