@@ -133,6 +133,18 @@ export class Timer extends DurableObject {
       g.base = 0;
       g.startedAt = now;
       saveGame = true;
+    } else if (p === "/api/game/stage") {
+      let stage = url.searchParams.get("stage");
+      if (req.method === "POST") { try { stage = (await req.json()).stage; } catch {} }
+      stage = Number(stage);
+      if (!Number.isInteger(stage) || stage < 1 || stage > GAME_STAGES.length)
+        return json({ error: "stage harus antara 1 dan " + GAME_STAGES.length }, 400);
+
+      g.base = GAME_STAGES
+        .slice(0, stage - 1)
+        .reduce((sum, item) => sum + item.duration, 0);
+      g.startedAt = now;
+      saveGame = true;
     } else if (p === "/api/game/adjust") {
       let sec = url.searchParams.get("seconds");
       if (req.method === "POST") { try { sec = (await req.json()).seconds; } catch {} }
@@ -408,6 +420,23 @@ button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid
   color:var(--muted-2);
   font:400 10px var(--mono);
 }
+.game-stage-set{
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:8px;
+  margin-bottom:8px;
+}
+.game-stage-set select{
+  min-width:0;
+  height:42px;
+  border:1px solid var(--line-strong);
+  border-radius:5px;
+  background:#0b0d0b;
+  color:var(--ink);
+  padding:0 10px;
+  font:500 11px var(--mono);
+}
+.game-stage-set button{min-width:72px}
 .game-action-row{margin-bottom:8px}
 .game-sync-grid{margin-top:8px}
 .game-running{
@@ -617,6 +646,25 @@ code{
           <span id="gameDuration">Durasi 05:00</span>
           <span id="gameNext">Next 06:59</span>
         </div>
+        <div class="game-stage-set ctl">
+          <select id="gameStageSelect" aria-label="Pilih Game Time stage">
+            <option value="1">#1 · 05:59 · 05:00</option>
+            <option value="2">#2 · 06:59 · 05:00</option>
+            <option value="3">#3 · 08:59 · 05:00</option>
+            <option value="4">#4 · 10:29 · 05:00</option>
+            <option value="5">#5 · 11:59 · 05:00</option>
+            <option value="6">#6 · 13:29 · 05:00</option>
+            <option value="7">#7 · 14:59 · 05:00</option>
+            <option value="8">#8 · 16:29 · 05:00</option>
+            <option value="9">#9 · 17:29 · 05:00</option>
+            <option value="10">#10 · 19:29 · 04:00</option>
+            <option value="11">#11 · 20:59 · 02:00</option>
+            <option value="12">#12 · 00:00 · 06:00</option>
+            <option value="13">#13 · 01:59 · 02:00</option>
+            <option value="14">#14 · 03:59 · 02:00</option>
+          </select>
+          <button id="gameSetStage">Set</button>
+        </div>
         <div class="row action-row game-action-row ctl">
           <button class="main" id="gameStart">Start</button>
           <button id="gameStop">Stop</button>
@@ -756,6 +804,8 @@ $("api").textContent = [
   "GAME TIME", "> POST " + location.origin + "/api/game/start",
   "> POST " + location.origin + "/api/game/stop",
   "> POST " + location.origin + "/api/game/reset",
+  "> POST " + location.origin + "/api/game/stage",
+  "  Body: { 'stage': 1 }",
   "> POST " + location.origin + "/api/game/adjust",
   "  Body: { 'seconds': 1 } // maju, -1 // mundur",
   "  AUTH // Bearer PASSWORD"
@@ -785,6 +835,9 @@ async function call(path, opt) {
       $("gameStop").disabled = !d.game_time.running;
       $("gameStatus").textContent = d.game_time.running ? "Berjalan" : "Berhenti";
       $("gameStatus").classList.toggle("game-running", d.game_time.running);
+      if (document.activeElement !== $("gameStageSelect")) {
+        $("gameStageSelect").value = String(d.game_time.stage);
+      }
     }
   } catch (e) { $("state").textContent = "Koneksi terputus"; }
 }
@@ -836,6 +889,9 @@ function tick() {
       $("gameDuration").textContent = "Durasi " + pad(stageMinutes) + ":" + pad(stageSecs);
       $("gameNext").textContent = "Next " + next.time;
       $("gameProgress").style.width = (progress * 100) + "%";
+      if (document.activeElement !== $("gameStageSelect")) {
+        $("gameStageSelect").value = String(current.index + 1);
+      }
       $("gameStatus").textContent = S.game_time.running ? "Berjalan" : "Berhenti";
       $("gameStatus").classList.toggle("game-running", S.game_time.running);
     }
@@ -860,6 +916,14 @@ $("forward10").onclick = () => adjust(10);
 $("gameStart").onclick = () => call("/api/game/start", { method: "POST" });
 $("gameStop").onclick = () => call("/api/game/stop", { method: "POST" });
 $("gameReset").onclick = () => call("/api/game/reset", { method: "POST" });
+$("gameSetStage").onclick = () => {
+  const stage = Number($("gameStageSelect").value);
+  call("/api/game/stage", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ stage }),
+  });
+};
 function adjustGame(seconds) {
   call("/api/game/adjust", {
     method: "POST",
